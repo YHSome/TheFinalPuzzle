@@ -26,14 +26,22 @@ from threading import Event, Thread
 from typing import Deque, List, Optional, Tuple
 
 # ------------------------------------------------------------------ 依赖导入
+def _exit(msg: str = "", code: int = 1):
+    """退出前等待用户按键，避免双击运行时窗口直接消失。"""
+    if msg:
+        print(msg)
+    input("\n按回车键退出...")
+    sys.exit(code)
+
+
 try:
     import pyautogui
 except ImportError:
-    sys.exit("[ERROR] pyautogui 未安装: pip install pyautogui")
+    _exit("[ERROR] pyautogui 未安装: pip install pyautogui")
 try:
     from PIL import Image
 except ImportError:
-    sys.exit("[ERROR] pillow 未安装: pip install pillow")
+    _exit("[ERROR] pillow 未安装: pip install pillow")
 try:
     import pytesseract
     HAS_TESSERACT = True
@@ -43,7 +51,7 @@ try:
     from pynput.keyboard import Controller as KBController, Key, Listener
     HAS_PYNPUT = True
 except ImportError:
-    sys.exit("[ERROR] pynput 未安装: pip install pynput")
+    _exit("[ERROR] pynput 未安装: pip install pynput")
 try:
     import win32gui, win32con
     HAS_WIN32 = True
@@ -57,7 +65,7 @@ try:
     from rich import box
     from rich.align import Align
 except ImportError:
-    sys.exit("[ERROR] rich 未安装: pip install rich")
+    _exit("[ERROR] rich 未安装: pip install rich")
 
 console = Console()
 
@@ -199,7 +207,7 @@ def hotkey_listener(hotkey: str):
     while not shutdown: time.sleep(0.5)
 
 # ------------------------------------------------------------------ 仪表盘
-def render_dashboard(cfg: Config) -> Layout:
+def render_dashboard(cfg: Config, next_check_time: float = 0) -> Layout:
     global paused, check_count, detect_count, enter_count, start_time
     global last_check_time, last_enter_time, last_detect_time
     global ocr_lines, last_match, last_error, events, timeline
@@ -239,19 +247,26 @@ def render_dashboard(cfg: Config) -> Layout:
     # -- Stats --
     def _ago(ts: float) -> str:
         if ts == 0: return "--"
-        ago = now - ts
-        if ago < 60: return f"{ago:.0f}s ago"
-        elif ago < 3600: return f"{ago/60:.0f}m ago"
-        else: return f"{ago/3600:.1f}h ago"
+        ago = max(1, int(now - ts))
+        if ago < 60: return f"{ago}s ago"
+        elif ago < 3600: return f"{ago//60}m ago"
+        else: return f"{ago//3600}h ago"
 
-    hit_rate = f"{detect_count/check_count*100:.0f}%" if check_count > 0 else "--"
+    # 倒计时
+    if paused:
+        ttd = "[dim]paused[/]"
+    elif next_check_time > 0:
+        remaining = max(0, next_check_time - now)
+        ttd = f"[cyan]{remaining:.0f}s[/]"
+    else:
+        ttd = "[dim]--[/]"
     stats_text = (
         f" Checks: {check_count:<6}  Detected: {detect_count:<6}  "
         f"Enter: [bold green]{enter_count}[/]  Uptime: {uptime_str}\n"
         f" Last check: {_ago(last_check_time):<12}  "
         f"Last detect: {_ago(last_detect_time):<12}  "
         f"Last enter: {_ago(last_enter_time):<12}  "
-        f"Hit rate: {hit_rate}"
+        f"Next check: {ttd}"
     )
     layout["stats"].update(Panel(stats_text, box=box.ROUNDED, border_style="blue"))
 
@@ -259,8 +274,8 @@ def render_dashboard(cfg: Config) -> Layout:
     tl = list(timeline)[-60:]
     if tl:
         bar_chars = {0: "[dim]-[/]", 1: "[yellow]|[/]", 2: "[green]#[/]"}
-        bar = "".join(bar_chars.get(v, "[dim]-[/]") for v in tl[:-1])
-        bar += "[cyan]>[/]"  # 当前位置
+        bar = "".join(bar_chars.get(v, "[dim]-[/]") for v in tl)
+        bar += "[cyan]>[/]"  # 下一个检测位置
     else:
         bar = "[dim]waiting for data...[/]"
     tl_label = ("  [dim]- none[/]  [yellow]| detected[/]  [green]# pressed[/]  "
@@ -296,23 +311,21 @@ def render_dashboard(cfg: Config) -> Layout:
 
     # -- Footer --
     mode_text = "[yellow]DRY-RUN (no key press)[/]" if cfg.dry_run else "[green]LIVE (will press Enter)[/]"
+    f8_text = "[green]F8: resume[/]" if paused else "[dim]F8: pause[/]"
     layout["footer"].update(Panel(
-        Align.center(f"[dim]F8: pause[/]  |  [dim]Ctrl+C: exit[/]  |  {mode_text}"),
+        Align.center(f"{f8_text}  |  [dim]Ctrl+C: exit[/]  |  {mode_text}"),
         box=box.ROUNDED, border_style="bright_black"))
 
     return layout
 
-def show_dashboard(cfg: Config):
-    """渲染仪表盘。先推出旧内容，再清屏，最后打印新帧。"""
+def show_dashboard(cfg: Config, next_check_time: float = 0):
+    """清屏 + 渲染仪表盘。"""
     with console.capture() as capture:
-        console.print(render_dashboard(cfg))
+        console.print(render_dashboard(cfg, next_check_time))
     frame = capture.get()
-    # 1. 60 行空行推出旧内容（PyCharm 靠这个）
-    sys.stdout.write("\n" * 60)
-    # 2. 系统清屏指令（PowerShell / cmd 生效，PyCharm 忽略）
-    os.system('cls' if os.name == 'nt' else 'clear')
-    # 3. 打印新仪表盘
-    sys.stdout.write(frame)
+    # \033[2J = 清整个屏幕, \033[H = 光标归位(0,0)
+    # 一次 write 完成，窗口大小变化也不会错位
+    sys.stdout.write("\033[2J\033[H" + frame)
     sys.stdout.flush()
 
 # ------------------------------------------------------------------ 一轮检测
@@ -466,7 +479,7 @@ def main():
         console.print("[red]pytesseract not installed, OCR mode unavailable.[/]")
         console.print("Run: pip install pytesseract")
         console.print("Or use blind mode: --blind")
-        sys.exit(1)
+        _exit()
 
     # Tesseract 路径
     if cfg.tesseract_cmd:
@@ -486,7 +499,7 @@ def main():
         region = find_window(cfg.window_title)
         if region is None:
             console.print(f"[red]Window not found: '{cfg.window_title}'[/]")
-            sys.exit(1)
+            _exit()
         console.print(f"[green]Window found:[/] {region}")
 
     start_time = time.time()
@@ -495,19 +508,24 @@ def main():
     t_hk = Thread(target=hotkey_listener, args=(cfg.pause_hotkey,), daemon=True)
     t_hk.start()
 
-    # 主循环
+    # 主循环：每秒刷新仪表盘，按间隔执行检测
+    next_check_time = time.time()  # 首次立即检测
     try:
         while not shutdown:
+            now = time.time()
+
             # 热键处理
             if hotkey_flag:
                 hotkey_flag = False
                 paused = not paused
 
-            if not paused:
+            # 到时间了且未暂停 → 检测
+            if not paused and now >= next_check_time:
                 do_check(cfg, region)
+                next_check_time = time.time() + cfg.interval
 
-            show_dashboard(cfg)
-            time.sleep(cfg.interval)
+            show_dashboard(cfg, next_check_time)
+            time.sleep(1)
 
     except KeyboardInterrupt:
         pass
@@ -517,6 +535,7 @@ def main():
         console.print()
         console.print(f"[bold]Final:[/] checks={check_count} detected={detect_count} enters={enter_count}")
         console.print("[dim]Exited[/]")
+        input("\n按回车键退出...")
 
 if __name__ == "__main__":
     main()
