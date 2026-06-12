@@ -247,7 +247,7 @@ def render_dashboard(cfg: Config, next_check_time: float = 0) -> Layout:
     # -- Stats --
     def _ago(ts: float) -> str:
         if ts == 0: return "--"
-        ago = max(1, int(now - ts))
+        ago = int(now - ts) + 1
         if ago < 60: return f"{ago}s ago"
         elif ago < 3600: return f"{ago//60}m ago"
         else: return f"{ago//3600}h ago"
@@ -323,9 +323,8 @@ def show_dashboard(cfg: Config, next_check_time: float = 0):
     with console.capture() as capture:
         console.print(render_dashboard(cfg, next_check_time))
     frame = capture.get()
-    # \033[2J = 清整个屏幕, \033[H = 光标归位(0,0)
-    # 一次 write 完成，窗口大小变化也不会错位
-    sys.stdout.write("\033[2J\033[H" + frame)
+    os.system('cls' if os.name == 'nt' else 'clear')
+    sys.stdout.write(frame)
     sys.stdout.flush()
 
 # ------------------------------------------------------------------ 一轮检测

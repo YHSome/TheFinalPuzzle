@@ -1,10 +1,10 @@
-# TheFinalPuzzle
+# TheFinalPuzzle - The Final Puzzle of Vibe Coding
 
 > Claude Auto-Responder — automatically monitors a Claude Code window and presses Enter when option prompts (Yes/No, Continue?, etc.) are detected.
 
 [简体中文](README.md) | **English**
 
-> **⚠️ This is a meme project — for entertainment purposes only!**
+> **⚠️ This is a joking project — for entertainment purposes only!**
 >
 > Do NOT use this in any real development, production, or important project.
 > Auto-pressing Enter means you may blindly agree to file modifications, command executions,
