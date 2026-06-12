@@ -128,7 +128,7 @@ If the user has typed anything within the cooldown window (last 5 seconds), the 
 
 ## Notes
 
-- **Terminal**: Windows Terminal / cmd support in-place dashboard refresh; PyCharm's built-in terminal does not support ANSI clear and will display as scrolling log
+- **Terminal**: PowerShell / cmd support `cls` in-place refresh; PyCharm's built-in terminal ignores `cls` and uses newlines to push old content away
 - **Window targeting**: OCR captures screen pixels — the Claude window must be visible and in the foreground, or targeted via `--title`
 - **Capture area**: Defaults to the bottom 30% of the window (prompt area only, skipping conversation history)
 - **Permissions**: macOS requires terminal accessibility permission in System Settings

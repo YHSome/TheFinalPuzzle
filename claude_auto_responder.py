@@ -303,12 +303,16 @@ def render_dashboard(cfg: Config) -> Layout:
     return layout
 
 def show_dashboard(cfg: Config):
-    """渲染仪表盘（用大量换行实现伪清屏，兼容 PyCharm 终端）。"""
+    """渲染仪表盘。先推出旧内容，再清屏，最后打印新帧。"""
     with console.capture() as capture:
         console.print(render_dashboard(cfg))
     frame = capture.get()
-    # PyCharm 终端不支持 ANSI 清屏，用 60 行空行推出旧内容
-    sys.stdout.write("\n" * 60 + frame)
+    # 1. 60 行空行推出旧内容（PyCharm 靠这个）
+    sys.stdout.write("\n" * 60)
+    # 2. 系统清屏指令（PowerShell / cmd 生效，PyCharm 忽略）
+    os.system('cls' if os.name == 'nt' else 'clear')
+    # 3. 打印新仪表盘
+    sys.stdout.write(frame)
     sys.stdout.flush()
 
 # ------------------------------------------------------------------ 一轮检测
