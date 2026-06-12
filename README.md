@@ -1,8 +1,8 @@
-# Claude Auto-Responder
+# TheFinalPuzzle
+
+> Claude Auto-Responder — automatically monitors a Claude Code window and presses Enter when option prompts (Yes/No, Continue?, etc.) are detected.
 
 **English** | [简体中文](README_CN.md)
-
-Automatically monitors a Claude Code window and presses Enter when option prompts (Yes/No, Continue?, etc.) are detected.
 
 > **⚠️ This is a meme project — for entertainment purposes only!**
 >
@@ -85,7 +85,7 @@ A live monitoring panel is displayed at runtime:
 
 ```
 ┌──────────────────────────────────────────┐
-│  Claude Auto-Responder                   │
+│  TheFinalPuzzle                          │
 │  > Running  Mode: OCR  Interval: 5s     │
 ├──────────────────────────────────────────┤
 │  Checks: 12  Detected: 3  Enter: 3      │

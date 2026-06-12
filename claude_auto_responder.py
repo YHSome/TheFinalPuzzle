@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Claude Auto-Responder — 自动监测 Claude 窗口并自动按 Enter
-===========================================================
+TheFinalPuzzle — Claude Auto-Responder
+======================================
+自动监测 Claude Code 窗口，当出现选项提示时自动按下 Enter 键。
 
-检测 Claude Code 出现选项提示时自动按下 Enter 键。
 每轮: 截图 → OCR → 检测 → 按键 → 清屏 → 刷新仪表盘 → 等待。
 
 依赖:
@@ -233,7 +233,7 @@ def render_dashboard(cfg: Config) -> Layout:
         f"Window: [cyan]{cfg.window_title or 'active'}[/]"
     )
     layout["header"].update(Panel(
-        Align.center(f"[bold white]Claude Auto-Responder[/]\n{status_line}"),
+        Align.center(f"[bold white]TheFinalPuzzle[/]\n{status_line}"),
         box=box.HEAVY, border_style="bright_cyan"))
 
     # -- Stats --
@@ -414,7 +414,7 @@ def do_check(cfg: Config, region: Optional[Tuple[int, int, int, int]]):
 # ------------------------------------------------------------------ 主函数
 def parse_args() -> Config:
     p = argparse.ArgumentParser(
-        description="Claude Auto-Responder — 自动监测 Claude 窗口选项提示并按 Enter",
+        description="TheFinalPuzzle — Claude Auto-Responder",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

@@ -1,10 +1,10 @@
 
 
-# Claude Auto-Responder
+# TheFinalPuzzle
+
+> Claude Auto-Responder — 自动监测 Claude Code 窗口，当出现选项提示（Yes/No、Continue? 等）时自动按下 Enter 键。
 
 [English](README.md) | **简体中文**
-
-自动监测 Claude Code 窗口，当出现选项提示（Yes/No、Continue? 等）时自动按下 Enter 键。
 
 > **⚠️ 整活项目，仅供娱乐！**
 >
@@ -86,7 +86,7 @@ python claude_auto_responder.py --help
 
 ```
 ┌──────────────────────────────────────────┐
-│  Claude Auto-Responder                   │
+│  TheFinalPuzzle                          │
 │  > 运行中  Mode: OCR  Interval: 5s       │
 ├──────────────────────────────────────────┤
 │  Checks: 12  Detected: 3  Enter: 3       │
