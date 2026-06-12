@@ -256,10 +256,15 @@ def render_dashboard(cfg: Config) -> Layout:
     layout["stats"].update(Panel(stats_text, box=box.ROUNDED, border_style="blue"))
 
     # -- Timeline --
-    bar_chars = {0: " ", 1: "[yellow]|[/]", 2: "[green]#[/]"}
-    bar = "".join(bar_chars.get(v, " ") for v in list(timeline)[-60:])
-    if not timeline: bar = "[dim]waiting for data...[/]"
-    tl_label = ("  [dim]' ' none[/]  [yellow]| detected[/]  [green]# pressed[/]  "
+    tl = list(timeline)[-60:]
+    if tl:
+        bar_chars = {0: "[dim]-[/]", 1: "[yellow]|[/]", 2: "[green]#[/]"}
+        bar = "".join(bar_chars.get(v, "[dim]-[/]") for v in tl[:-1])
+        bar += "[cyan]>[/]"  # 当前位置
+    else:
+        bar = "[dim]waiting for data...[/]"
+    tl_label = ("  [dim]- none[/]  [yellow]| detected[/]  [green]# pressed[/]  "
+                "[cyan]> current[/]  "
                 f"[dim](last {min(len(timeline), 60)})[/]")
     layout["timeline_bar"].update(Panel(
         f"{bar}\n{tl_label}",
