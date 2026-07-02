@@ -462,28 +462,18 @@ class MonitorWorker(QThread):
 
     # ------------------------------------------------------------------
     def run(self) -> None:
-        """主监控循环（在后台线程中运行）。"""
+        """主监控循环（在后台线程中运行）。
+        窗口查找已在主线程完成（_cached_region 由 _on_start 预设）。
+        """
         self._stop_requested = False
         self._paused = False
         self.start_time = time.time()
 
-        # 查找窗口
-        if not self.blind_mode and self.window_title:
-            region = find_window(self.window_title)
-            if region:
-                self._cached_region = region
-                self.event_log.emit(
-                    datetime.now().strftime("%H:%M:%S"), "info",
-                    f"窗口已找到: {self.window_title} ({region[2]}x{region[3]})"
-                )
-            else:
-                self.event_log.emit(
-                    datetime.now().strftime("%H:%M:%S"), "error",
-                    f"未找到窗口: {self.window_title}，使用活动窗口"
-                )
-                self._cached_region = None
-        else:
-            self._cached_region = None
+        # _cached_region 已由主线程设置好:
+        #   None + 盲模式    → 跳过
+        #   None + OCR+无标题 → 每轮 get_active_window_region()
+        #   None + OCR+有标题 → 没找到，回退到活动窗口
+        #   (x,y,w,h)        → 直接用
 
         # 启动热键监听
         self._start_hotkey_listener()
@@ -1421,6 +1411,22 @@ class MainWindow(QMainWindow):
         if self._settings["tesseract_cmd"]:
             pytesseract.pytesseract.tesseract_cmd = self._settings["tesseract_cmd"]
 
+        # —— 在主线程查找窗口（EnumWindows 不能在工作线程调用） ——
+        cached_region = None
+        if not self._settings["blind_mode"] and self._settings["window_title"]:
+            region = find_window(self._settings["window_title"])
+            if region:
+                cached_region = region
+                self._status_label.setText(
+                    f"窗口已找到: {self._settings['window_title']} "
+                    f"({region[2]}x{region[3]})"
+                )
+            else:
+                cached_region = None
+                self._status_label.setText(
+                    f"未找到窗口: {self._settings['window_title']}，使用活动窗口"
+                )
+
         # 创建并启动工作线程
         self._worker = MonitorWorker()
         self._worker.window_title = self._settings["window_title"]
@@ -1431,6 +1437,7 @@ class MainWindow(QMainWindow):
         self._worker.tesseract_cmd = self._settings["tesseract_cmd"] or None
         self._worker.crop_bottom_ratio = self._settings["crop_bottom_ratio"]
         self._worker.pause_hotkey = self._settings["pause_hotkey"]
+        self._worker._cached_region = cached_region  # 主线程查好的窗口区域
 
         # 连接信号
         self._worker.stats_update.connect(self._on_stats_update)
@@ -1714,6 +1721,19 @@ class MainWindow(QMainWindow):
 def main() -> None:
     """主入口函数。"""
     check_deps()
+
+    # Windows DPI — 必须在 QApplication 之前设置
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            # 尝试 PerMonitorV2 (Win10 1703+)
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)
+        except Exception:
+            try:
+                # fallback: system DPI
+                ctypes.windll.user32.SetProcessDPIAware()
+            except Exception:
+                pass
 
     # Windows 下的编码设置
     if hasattr(sys.stdout, "reconfigure"):
