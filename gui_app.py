@@ -1366,17 +1366,18 @@ class MainWindow(QMainWindow):
 
     # ------------------------------------------------------------------
     def _on_settings(self) -> None:
-        """打开设置对话框。"""
-        if self._running:
+        """打开设置对话框。运行时需先暂停，暂停/停止时可直接修改。"""
+        # 运行中且未暂停 → 提示先暂停
+        if self._running and not self._paused:
             reply = QMessageBox.question(
                 self, "正在运行",
-                "修改设置需要先停止监控。\n\n是否停止并打开设置？",
+                "修改设置需要先暂停监控。\n\n是否暂停并打开设置？",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No
             )
             if reply != QMessageBox.StandardButton.Yes:
                 return
-            self._on_stop()
+            self._on_pause()  # 先暂停
 
         dlg = SettingsDialog(
             self,
@@ -1396,6 +1397,16 @@ class MainWindow(QMainWindow):
             # 应用 Tesseract 路径
             if self._settings["tesseract_cmd"]:
                 pytesseract.pytesseract.tesseract_cmd = self._settings["tesseract_cmd"]
+
+            # 如果正在运行（暂停状态），同步设置到 worker
+            if self._running and self._worker:
+                self._worker.interval = self._settings["interval"]
+                self._worker.cooldown = self._settings["cooldown"]
+                self._worker.dry_run = self._settings["dry_run"]
+                self._worker.blind_mode = self._settings["blind_mode"]
+                self._worker.tesseract_cmd = self._settings["tesseract_cmd"] or None
+                self._worker.crop_bottom_ratio = self._settings["crop_bottom_ratio"]
+                self._worker.pause_hotkey = self._settings["pause_hotkey"]
 
             self._status_label.setText(
                 f"设置已更新 — 间隔 {self._settings['interval']:.0f}s, "
