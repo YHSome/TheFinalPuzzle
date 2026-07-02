@@ -64,9 +64,11 @@ try:
     import win32gui
     import win32con
     import win32process
+    import win32ui
     HAS_WIN32 = True
 except ImportError:
     win32process = None
+    win32ui = None
     HAS_WIN32 = False
     MISSING_DEPS.append("pywin32")
 
@@ -307,10 +309,10 @@ def detect_prompt(text: str) -> Tuple[bool, str]:
     return False, ""
 
 
-def find_window(title_pattern: str) -> Optional[Tuple[int, int, int, int]]:
-    """根据标题查找窗口，返回 (x, y, w, h)。"""
+def find_window(title_pattern: str) -> Optional[Tuple[int, int, int, int, int]]:
+    """根据标题查找窗口，返回 (x, y, w, h, hwnd) 或 None。"""
     if HAS_WIN32:
-        result: Optional[Tuple[int, int, int, int]] = None
+        result: Optional[Tuple[int, int, int, int, int]] = None
 
         def _cb(hwnd, _):
             nonlocal result
@@ -325,14 +327,15 @@ def find_window(title_pattern: str) -> Optional[Tuple[int, int, int, int]]:
                     win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
                     time.sleep(0.3)
                 rect = win32gui.GetWindowRect(hwnd)
-                result = (rect[0], rect[1], rect[2] - rect[0], rect[3] - rect[1])
+                result = (rect[0], rect[1], rect[2] - rect[0],
+                          rect[3] - rect[1], hwnd)
                 return False
             return True
 
         win32gui.EnumWindows(_cb, None)
         if result:
             return result
-    # fallback: pyautogui
+    # fallback: pyautogui (no hwnd available)
     try:
         wins = pyautogui.getWindowsWithTitle(title_pattern)
         if wins:
@@ -340,10 +343,64 @@ def find_window(title_pattern: str) -> Optional[Tuple[int, int, int, int]]:
             if w.isMinimized:
                 w.restore()
                 time.sleep(0.3)
-            return (w.left, w.top, w.width, w.height)
+            return (w.left, w.top, w.width, w.height, 0)
     except Exception:
         pass
     return None
+
+
+def capture_window_direct(hwnd: int,
+                          crop_bottom_ratio: float = 1.0) -> Optional[Image.Image]:
+    """使用 PrintWindow API 直接捕获窗口（即使被其他窗口遮挡）。
+    返回 PIL Image，失败返回 None。
+    """
+    if not HAS_WIN32 or win32ui is None or hwnd == 0:
+        return None
+    try:
+        left, top, right, bottom = win32gui.GetWindowRect(hwnd)
+        width = right - left
+        height = bottom - top
+        if width <= 0 or height <= 0:
+            return None
+
+        hwnd_dc = win32gui.GetWindowDC(hwnd)
+        mfc_dc = win32ui.CreateDCFromHandle(hwnd_dc)
+        save_dc = mfc_dc.CreateCompatibleDC()
+        bitmap = win32ui.CreateBitmap()
+        bitmap.CreateCompatibleBitmap(mfc_dc, width, height)
+        save_dc.SelectObject(bitmap)
+
+        # PW_RENDERFULLCONTENT=2 (Win8.1+): 即使窗口被遮挡也能渲染
+        result = win32gui.PrintWindow(hwnd, save_dc.GetSafeHdc(), 2)
+        if result != 1:
+            win32gui.DeleteObject(bitmap.GetHandle())
+            save_dc.DeleteDC()
+            mfc_dc.DeleteDC()
+            win32gui.ReleaseDC(hwnd, hwnd_dc)
+            return None
+
+        bmp_info = bitmap.GetInfo()
+        bmp_bits = bitmap.GetBitmapBits(True)
+        img = Image.frombuffer(
+            "RGB",
+            (bmp_info["bmWidth"], bmp_info["bmHeight"]),
+            bmp_bits, "raw", "BGRX", 0, 1,
+        )
+
+        win32gui.DeleteObject(bitmap.GetHandle())
+        save_dc.DeleteDC()
+        mfc_dc.DeleteDC()
+        win32gui.ReleaseDC(hwnd, hwnd_dc)
+
+        # 裁剪底部
+        if 0 < crop_bottom_ratio < 1:
+            ct = int(height * (1 - crop_bottom_ratio))
+            ch = int(height * crop_bottom_ratio)
+            img = img.crop((0, ct, width, ct + ch))
+
+        return img
+    except Exception:
+        return None
 
 
 def get_active_window_region() -> Tuple[int, int, int, int]:
@@ -454,6 +511,7 @@ class MonitorWorker(QThread):
 
         # ---- 窗口区域缓存 ----
         self._cached_region: Optional[Tuple[int, int, int, int]] = None
+        self._cached_hwnd: int = 0  # 窗口句柄（0=无，用于 PrintWindow 直抓）
 
         # ---- 热键监听线程 ----
         self._hotkey_thread: Optional[Thread] = None
@@ -607,21 +665,28 @@ class MonitorWorker(QThread):
             return
 
         # ---- OCR 模式 ----
-        region = self._cached_region
-        if region is None:
-            try:
-                region = get_active_window_region()
-            except Exception:
-                region = (0, 0, 1920, 1080)
+        img = None
 
-        # 截图
-        try:
-            img = capture_screenshot(region, self.crop_bottom_ratio)
-        except Exception as e:
-            self.last_error = f"截图失败: {e}"
-            self.error_msg.emit(self.last_error)
-            self.timeline_tick.emit(0)
-            return
+        # 优先：直接用 PrintWindow API 抓窗口（即使被遮挡也可）
+        if self._cached_hwnd != 0:
+            img = capture_window_direct(self._cached_hwnd,
+                                        self.crop_bottom_ratio)
+
+        # 回退：屏幕截图（需要窗口可见）
+        if img is None:
+            region = self._cached_region
+            if region is None:
+                try:
+                    region = get_active_window_region()
+                except Exception:
+                    region = (0, 0, 1920, 1080)
+            try:
+                img = capture_screenshot(region, self.crop_bottom_ratio)
+            except Exception as e:
+                self.last_error = f"截图失败: {e}"
+                self.error_msg.emit(self.last_error)
+                self.timeline_tick.emit(0)
+                return
 
         # OCR
         try:
@@ -1413,16 +1478,18 @@ class MainWindow(QMainWindow):
 
         # —— 在主线程查找窗口（EnumWindows 不能在工作线程调用） ——
         cached_region = None
+        cached_hwnd = 0
         if not self._settings["blind_mode"] and self._settings["window_title"]:
-            region = find_window(self._settings["window_title"])
-            if region:
-                cached_region = region
+            found = find_window(self._settings["window_title"])
+            if found:
+                x, y, w, h, hwnd = found
+                cached_region = (x, y, w, h)
+                cached_hwnd = hwnd
                 self._status_label.setText(
                     f"窗口已找到: {self._settings['window_title']} "
-                    f"({region[2]}x{region[3]})"
+                    f"({w}x{h})"
                 )
             else:
-                cached_region = None
                 self._status_label.setText(
                     f"未找到窗口: {self._settings['window_title']}，使用活动窗口"
                 )
@@ -1438,6 +1505,7 @@ class MainWindow(QMainWindow):
         self._worker.crop_bottom_ratio = self._settings["crop_bottom_ratio"]
         self._worker.pause_hotkey = self._settings["pause_hotkey"]
         self._worker._cached_region = cached_region  # 主线程查好的窗口区域
+        self._worker._cached_hwnd = cached_hwnd      # 窗口句柄（用于 PrintWindow 直抓）
 
         # 连接信号
         self._worker.stats_update.connect(self._on_stats_update)
@@ -1570,6 +1638,17 @@ class MainWindow(QMainWindow):
                 self._worker.tesseract_cmd = self._settings["tesseract_cmd"] or None
                 self._worker.crop_bottom_ratio = self._settings["crop_bottom_ratio"]
                 self._worker.pause_hotkey = self._settings["pause_hotkey"]
+
+                # 如果窗口标题变了，重新查找
+                if not self._settings["blind_mode"] and self._settings["window_title"]:
+                    found = find_window(self._settings["window_title"])
+                    if found:
+                        x, y, w, h, hwnd = found
+                        self._worker._cached_region = (x, y, w, h)
+                        self._worker._cached_hwnd = hwnd
+                    else:
+                        self._worker._cached_region = None
+                        self._worker._cached_hwnd = 0
 
             self._status_label.setText(
                 f"设置已更新 — 间隔 {self._settings['interval']:.0f}s, "
