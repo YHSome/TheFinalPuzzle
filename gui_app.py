@@ -63,8 +63,11 @@ except ImportError:
 try:
     import win32gui
     import win32con
+    import win32process
     HAS_WIN32 = True
 except ImportError:
+    win32process = None
+    HAS_WIN32 = False
     MISSING_DEPS.append("pywin32")
 
 try:
@@ -799,6 +802,144 @@ class TimelineWidget(QFrame):
 
 
 # ============================================================================
+# 窗口扫描
+# ============================================================================
+
+def list_visible_windows() -> List[Tuple[str, str]]:
+    """列出所有可见窗口，返回 [(标题, 进程名), ...]，按标题排序。"""
+    results: List[Tuple[str, str]] = []
+
+    if HAS_WIN32:
+        def _cb(hwnd, _):
+            if not win32gui.IsWindowVisible(hwnd):
+                return True
+            try:
+                title = win32gui.GetWindowText(hwnd)
+            except Exception:
+                return True
+            if not title.strip():
+                return True
+            # 获取进程名
+            try:
+                _, pid = win32process.GetWindowThreadProcessId(hwnd)
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(0x0400 | 0x0010, False, pid)
+                if handle:
+                    try:
+                        path = win32process.GetModuleFileNameEx(handle, 0)
+                        proc = os.path.basename(path)
+                    except Exception:
+                        proc = f"PID:{pid}"
+                    kernel32.CloseHandle(handle)
+                else:
+                    proc = f"PID:{pid}"
+            except Exception:
+                proc = "?"
+            results.append((title, proc))
+            return True
+
+        win32gui.EnumWindows(_cb, None)
+    else:
+        # fallback: pyautogui
+        try:
+            for w in pyautogui.getAllWindows():
+                if w.title.strip():
+                    results.append((w.title, ""))
+        except Exception:
+            pass
+
+    # 去重排序
+    seen = set()
+    uniq = []
+    for t, p in results:
+        if t not in seen:
+            seen.add(t)
+            uniq.append((t, p))
+    uniq.sort(key=lambda x: x[0].lower())
+    return uniq
+
+
+class WindowPickerDialog(QDialog):
+    """窗口选择器：列出所有可见窗口供用户选择。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("选择窗口")
+        self.setMinimumSize(550, 400)
+        self.setStyleSheet(DARK_STYLE)
+        self._selected_title: str = ""
+
+        layout = QVBoxLayout(self)
+
+        label = QLabel("当前可见窗口（点击选中，双击确认）：")
+        layout.addWidget(label)
+
+        # 表格
+        from PySide6.QtWidgets import QTableWidget, QTableWidgetItem, QHeaderView, \
+            QAbstractItemView
+        self._table = QTableWidget(0, 2)
+        self._table.setHorizontalHeaderLabels(["窗口标题", "进程"])
+        self._table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Stretch
+        )
+        self._table.setColumnWidth(1, 150)
+        self._table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self._table.setEditTriggers(
+            QAbstractItemView.EditTrigger.NoEditTriggers
+        )
+        self._table.verticalHeader().setVisible(False)
+        self._table.setAlternatingRowColors(True)
+        self._table.cellDoubleClicked.connect(self._on_select)
+        layout.addWidget(self._table)
+
+        # 填充数据
+        windows = list_visible_windows()
+        self._table.setRowCount(len(windows))
+        for i, (title, proc) in enumerate(windows):
+            ti = QTableWidgetItem(title)
+            ti.setToolTip(title)
+            self._table.setItem(i, 0, ti)
+            pi = QTableWidgetItem(proc)
+            self._table.setItem(i, 1, pi)
+
+        # 刷新按钮 + 确定/取消
+        btn_layout = QHBoxLayout()
+        refresh_btn = QPushButton("🔄 刷新")
+        refresh_btn.clicked.connect(self._refresh)
+        btn_layout.addWidget(refresh_btn)
+        btn_layout.addStretch()
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        buttons.accepted.connect(self._on_select)
+        buttons.rejected.connect(self.reject)
+        btn_layout.addWidget(buttons)
+        layout.addLayout(btn_layout)
+
+    def _refresh(self) -> None:
+        windows = list_visible_windows()
+        self._table.setRowCount(len(windows))
+        for i, (title, proc) in enumerate(windows):
+            self._table.setItem(i, 0, QTableWidgetItem(title))
+            self._table.setItem(i, 1, QTableWidgetItem(proc))
+
+    def _on_select(self) -> None:
+        row = self._table.currentRow()
+        if row >= 0:
+            self._selected_title = self._table.item(row, 0).text()
+        self.accept()
+
+    @property
+    def selected_title(self) -> str:
+        return self._selected_title
+
+
+# ============================================================================
 # 设置对话框
 # ============================================================================
 
@@ -822,10 +963,19 @@ class SettingsDialog(QDialog):
         layout = QFormLayout(self)
         layout.setSpacing(12)
 
-        # 窗口标题
+        # 窗口标题（带扫描按钮）
+        title_widget = QWidget()
+        title_layout = QHBoxLayout(title_widget)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(6)
         self.window_title_edit = QLineEdit(window_title)
         self.window_title_edit.setPlaceholderText("留空则监控当前活动窗口")
-        layout.addRow("窗口标题:", self.window_title_edit)
+        title_layout.addWidget(self.window_title_edit)
+        scan_btn = QPushButton("🔍 扫描窗口")
+        scan_btn.setFixedWidth(110)
+        scan_btn.clicked.connect(self._scan_windows)
+        title_layout.addWidget(scan_btn)
+        layout.addRow("窗口标题:", title_widget)
 
         # 检测间隔
         self.interval_spin = QDoubleSpinBox()
@@ -879,6 +1029,12 @@ class SettingsDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
+
+    def _scan_windows(self) -> None:
+        """弹出窗口选择器，让用户从可见窗口列表中选取。"""
+        picker = WindowPickerDialog(self)
+        if picker.exec() == QDialog.DialogCode.Accepted and picker.selected_title:
+            self.window_title_edit.setText(picker.selected_title)
 
     def get_values(self) -> dict:
         return {
