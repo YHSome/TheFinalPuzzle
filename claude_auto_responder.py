@@ -96,7 +96,7 @@ class Config:
     dry_run: bool = False
     blind_mode: bool = False
     tesseract_cmd: Optional[str] = None
-    crop_bottom_ratio: float = 0.30
+    crop_bottom_ratio: float = 1.0
     save_screenshots: bool = False
     screenshot_dir: str = "./screenshots"
     pause_hotkey: str = "f8"
