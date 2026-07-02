@@ -176,15 +176,6 @@ QPushButton#pauseBtn:hover {
     background-color: #ab8f20;
 }
 
-QPushButton#stopBtn {
-    background-color: #8b1a1a;
-    border-color: #ab3a3a;
-}
-
-QPushButton#stopBtn:hover {
-    background-color: #ab3a3a;
-}
-
 QLabel {
     color: #e0e0e0;
     background: transparent;
@@ -1062,12 +1053,6 @@ class MainWindow(QMainWindow):
         self._pause_btn.clicked.connect(self._on_pause)
         layout.addWidget(self._pause_btn)
 
-        self._stop_btn = QPushButton("⏹  停止")
-        self._stop_btn.setObjectName("stopBtn")
-        self._stop_btn.setEnabled(False)
-        self._stop_btn.clicked.connect(self._on_stop)
-        layout.addWidget(self._stop_btn)
-
         layout.addStretch()
 
         self._settings_btn = QPushButton("⚙  设置")
@@ -1236,18 +1221,8 @@ class MainWindow(QMainWindow):
     # ==================================================================
 
     def closeEvent(self, event) -> None:
-        """关闭窗口 → 最小化到托盘而非退出。"""
-        if self._tray_icon.isVisible():
-            self.hide()
-            self._tray_icon.showMessage(
-                "TheFinalPuzzle",
-                "应用已最小化到系统托盘，仍在后台运行。",
-                QSystemTrayIcon.MessageIcon.Information,
-                2000
-            )
-            event.ignore()
-        else:
-            self._quit_app()
+        """关闭窗口 → 直接退出。"""
+        self._quit_app()
 
     def _quit_app(self) -> None:
         """安全退出应用。"""
@@ -1433,7 +1408,6 @@ class MainWindow(QMainWindow):
         """根据运行状态更新按钮启用/禁用。"""
         self._start_btn.setEnabled(not self._running)
         self._pause_btn.setEnabled(self._running)
-        self._stop_btn.setEnabled(self._running)
         if self._running:
             self._pause_btn.setText("⏸  暂停" if not self._paused else "▶  继续")
 
